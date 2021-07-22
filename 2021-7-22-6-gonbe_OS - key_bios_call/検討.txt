@@ -1,0 +1,63 @@
+検討
+
+386以降でプロテクトモードからリアルモードに移行するには、セグメントレジスタをリアルモードの値にし、A20 線をディセーブルし、CR0レジスタのPEビットをクリアすればよく、286で必要だった初期設定が不要になった。
+
+far jmp で有効になると思う
+
+リアルモードプログラムは　boot_loader 後半の 0x7e00 に置くこのエリアは boot_loader でロードされる
+ここに jmp したことを確認するために画面モードを 320x200 に固定する
+
+		CALL	waitkbdout
+		MOV		AL,0xd1
+		OUT		0x64,AL
+		CALL	waitkbdout
+		MOV		AL,0xdf			; enable A20
+;;;		mov		al,0xdd			; disable A20
+		OUT		0x60,AL
+		CALL	waitkbdout
+
+CR0 の bit0 をクリアしてセグメントレジスタを０クリアして jmp dword 0:0x7e00 を実行し
+0x7e00 番地に 32bit コードで画面上部クリアを入れたらクリアされた
+つまり far jmp しても 32bit のままだった
+...........................................................................
+
+GDT 4番エントリーとして 16bit 0番地 start のセグメントを用意する
+
+まず 32bit セグメントで Real mode で 0x7e00 へ飛ぶ  できた
+
+32bit セグメントで　単に　4番セグメントに飛ぶ　OK
+...........................................................................
+
+32bit で飛んで 32bit で復帰
+
+boot_loader の後半に key_input を置いたが別ファイルにする必要あり（シンボルがリンク出来ないから）
+
+key_mouse.nasm 作成、boot_loader.nasm 修正、linker.ld 修正、build.sh 修正
+srec_to_img.cpp を名前を変更して修正
+..............................................................................................
+
+key_mouse.nasm にて dword jmp 2*8:key_input_return-0x00280000
+
+
+
+
+
+16bit にするには（プロテクトモードで） 16bit セグメントへ飛ぶ、その後 real mode で　jmp 0:0x7e00
+
+32bit セグメントから 16bit セグメントに飛ぶ前に LGDT 命令がいるかと思ったが、いらないという事で進めてみよう
+そしてすぐに何もせずに 32bit セグメントに飛ぶ　4番セグメントを 16bit にするだけ、key_mouse で何もせずに far jmp で帰る
+上手くいった  os_start - No35.nasm   key_mouse - No3.nasm
+
+次に 16bit セグメント(key_mouse.nasm)にて Real mode にして  jmp dword 0:key_input_real  実行
+key_input_real にて Protect mode にして jmp dword 2*8:key_input_return-0x00280000  実行して  main へ戻る
+
+key bios int 0x16 ah=0 get keystorch は NG ah=0x10 も NG
+
+ah=0x21 int 0x16  でキー入力できるようだただしキーが押されている時は al の bit7 がクリアされており
+キーから手を離すと al の bit7 がセットされる、これを利用してキーが押されたタイミングを見てキー入力とする
+
+マウスの int xxh を探す,一覧表の int 00h～int 20h 位を探してみるのも良い
+
+key_input() は下位８ビットにコードが入ってすぐに帰ってくる
+ビット７が１の状態から０になった時のコードを 128エントリーのテーブルで ascii コードに変換して返す関数を
+ut_getc(); として作成する
